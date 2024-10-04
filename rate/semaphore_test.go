@@ -28,11 +28,6 @@ func init() {
 	flag.StringVar(&redisClusterAddrs, "redis_cluster_addrs", "localhost:7000,localhost:7001,localhost:7002", "comma separated list of redis server addresses")
 }
 
-type taskMessage struct {
-	ID    string
-	Queue string
-}
-
 func TestNewSemaphore(t *testing.T) {
 	tests := []struct {
 		desc           string
@@ -94,10 +89,7 @@ func TestNewSemaphore_Acquire(t *testing.T) {
 			maxConcurrency: 3,
 			taskIDs:        []string{uuid.NewString(), uuid.NewString()},
 			ctxFunc: func(id string) (context.Context, context.CancelFunc) {
-				return getAsynqContext(context.Background(), taskMessage{
-					ID:    id,
-					Queue: "task-1",
-				}, time.Now().Add(time.Second))
+				return getAsynqContext(context.Background(), id, "task-1", time.Now().Add(time.Second))
 			},
 			want: []bool{true, true},
 		},
@@ -107,10 +99,7 @@ func TestNewSemaphore_Acquire(t *testing.T) {
 			maxConcurrency: 3,
 			taskIDs:        []string{uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()},
 			ctxFunc: func(id string) (context.Context, context.CancelFunc) {
-				return getAsynqContext(context.Background(), taskMessage{
-					ID:    id,
-					Queue: "task-2",
-				}, time.Now().Add(time.Second))
+				return getAsynqContext(context.Background(), id, "task-2", time.Now().Add(time.Second))
 			},
 			want: []bool{true, true, true, false},
 		},
@@ -222,10 +211,7 @@ func TestNewSemaphore_Acquire_StaleToken(t *testing.T) {
 	sema := NewSemaphore(opt, "stale-token", 1)
 	defer sema.Close()
 
-	ctx, cancel := getAsynqContext(context.Background(), taskMessage{
-		ID:    taskID,
-		Queue: "task-1",
-	}, time.Now().Add(time.Second))
+	ctx, cancel := getAsynqContext(context.Background(), taskID, "task-1", time.Now().Add(time.Second))
 	defer cancel()
 
 	got, err := sema.Acquire(ctx)
@@ -251,10 +237,7 @@ func TestNewSemaphore_Release(t *testing.T) {
 			name:    "task-5",
 			taskIDs: []string{uuid.NewString()},
 			ctxFunc: func(id string) (context.Context, context.CancelFunc) {
-				return getAsynqContext(context.Background(), taskMessage{
-					ID:    id,
-					Queue: "task-3",
-				}, time.Now().Add(time.Second))
+				return getAsynqContext(context.Background(), id, "task-3", time.Now().Add(time.Second))
 			},
 		},
 		{
@@ -262,10 +245,7 @@ func TestNewSemaphore_Release(t *testing.T) {
 			name:    "task-6",
 			taskIDs: []string{uuid.NewString(), uuid.NewString()},
 			ctxFunc: func(id string) (context.Context, context.CancelFunc) {
-				return getAsynqContext(context.Background(), taskMessage{
-					ID:    id,
-					Queue: "task-4",
-				}, time.Now().Add(time.Second))
+				return getAsynqContext(context.Background(), id, "task-4", time.Now().Add(time.Second))
 			},
 		},
 	}
@@ -340,10 +320,7 @@ func TestNewSemaphore_Release_Error(t *testing.T) {
 			name:    "task-8",
 			taskIDs: []string{uuid.NewString()},
 			ctxFunc: func(_ string) (context.Context, context.CancelFunc) {
-				return getAsynqContext(context.Background(), taskMessage{
-					ID:    testID,
-					Queue: "task-4",
-				}, time.Now().Add(time.Second))
+				return getAsynqContext(context.Background(), testID, "task-4", time.Now().Add(time.Second))
 			},
 			errStr: fmt.Sprintf("no token found for task %q", testID),
 		},
@@ -403,9 +380,10 @@ func getRedisConnOpt(tb testing.TB) asynq.RedisConnOpt {
 	}
 }
 
-func getAsynqContext(base context.Context, msg taskMessage, deadline time.Time) (context.Context, context.CancelFunc) {
-	ctx := context.WithValue(base, 0, msg)
-	return context.WithDeadline(ctx, deadline)
+// getAsynqContext returns a context and cancel function for a given task message and deadline.
+func getAsynqContext(base context.Context, id, qname string, deadline time.Time) (context.Context, context.CancelFunc) {
+	// macRetry and retryCount does not matter for this test. We are using it to satisfy asynq.Context interface.
+	return asynq.NewAsynqContext(base, id, qname, 0, 0, deadline)
 }
 
 type badConnOpt struct{}
